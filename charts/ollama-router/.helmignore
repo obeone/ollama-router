@@ -1,0 +1,6 @@
+# Patterns to ignore when building packages.
+# This will be appended to the patterns specified in your Git ignore file.
+.git/
+.github/
+.vscode/
+.editorconfig

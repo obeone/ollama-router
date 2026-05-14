@@ -1,0 +1,4 @@
+# Render all resources based on the values and the common library chart.
+# This line includes the common library chart which generates standard Kubernetes resources
+# based on the configurations provided in values.yaml.
+{{- include "bjw-s.common.loader.all" . }}
