@@ -1,7 +1,11 @@
 #
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
-# For a full list of values, see https://github.com/bjw-s/helm-charts/blob/main/charts/library/common/values.yaml
+# Example values for the ollama-router Helm chart.
+# Override anything you need in your own values file — do not edit this
+# in place for site-specific changes (use values_local.yaml or a values
+# file passed via `-f`).
+#
+# Full surface of inherited keys:
+# https://github.com/bjw-s-labs/helm-charts/tree/main/charts/library/common
 #
 
 # -- Controllers configuration
@@ -12,16 +16,14 @@ controllers:
   # @default -- See below
   main:
     # -- Enable this controller.
-    # @default -- `true`
     enabled: true
     # -- The type of controller to deploy.
-    # @default -- `deployment`
     type: deployment
     # -- The number of replicas to deploy.
-    # @default -- `1`
+    # Note: the router pins sessions to a node via an in-memory cache,
+    # so scaling >1 trades cache locality for HA — your call.
     replicas: 1
     # -- The strategy to use for deployments.
-    # @default -- `RollingUpdate`
     strategy: RollingUpdate
 
     # -- The main container configuration.
@@ -29,25 +31,34 @@ controllers:
     containers:
       main:
         # -- The image to deploy.
+        # Public images:
+        #   - obeoneorg/ollama-router        (Docker Hub)
+        #   - ghcr.io/obeone/ollama-router   (GHCR)
         # @default -- See below
         image:
           # -- Image repository for the Ollama router.
-          repository: harbor.obeone.cloud/public/ollama-router
+          repository: ghcr.io/obeone/ollama-router
           # -- Image pull policy for the container.
           pullPolicy: IfNotPresent
-          # -- Image tag, leave empty to use `chart.appVersion`.
+          # -- Image tag. Leave empty to use `chart.appVersion`.
           tag: latest
 
         # -- Environment variables for the container.
+        # See the root README for the full list and semantics.
         # @default -- See below
         env:
-          # -- Log level for the application (e.g., debug, info, warn, error).
+          # -- Log level: debug, info, warn, error.
           LOG_LEVEL: "info"
-          # -- JSON array of Ollama backend nodes to connect to.
-          OLLAMA_NODES_JSON: '[{"name":"ollama1","baseURL":"http://ollama:11434"},{"name":"ollama2","baseURL":"https://ollama2:11434"}]'
-          # -- Health check polling interval in seconds.
+          # -- JSON array of Ollama backend nodes. REQUIRED — override
+          # this with your real backends before deploying.
+          OLLAMA_NODES_JSON: |
+            [
+              {"name":"ollama1","baseURL":"http://ollama-1.example.com:11434"},
+              {"name":"ollama2","baseURL":"http://ollama-2.example.com:11434"}
+            ]
+          # -- Health check polling interval (seconds).
           POLL_INTERVAL_SECONDS: "5"
-          # -- Model ownership cache TTL (Time To Live) in seconds.
+          # -- Model ownership cache TTL (seconds).
           MODEL_CACHE_TTL_SECONDS: "120"
 
         # -- Probes for liveness, readiness, and startup checks.
@@ -55,28 +66,22 @@ controllers:
         probes:
           liveness:
             # -- Enable the liveness probe.
-            # @default -- `true`
             enabled: true
-            # -- The specification for the liveness probe.
-            # @default -- See below
             spec:
               httpGet:
                 path: /healthz
-                port: &port 8080 # Anchor for reuse in other probes/services
+                port: &port 8080 # Anchor reused by readiness + service
               initialDelaySeconds: 15
               periodSeconds: 10
               timeoutSeconds: 5
               failureThreshold: 3
           readiness:
             # -- Enable the readiness probe.
-            # @default -- `true`
             enabled: true
-            # -- The specification for the readiness probe.
-            # @default -- See below
             spec:
               httpGet:
                 path: /healthz
-                port: *port # Use the anchored port from liveness probe
+                port: *port
               initialDelaySeconds: 5
               periodSeconds: 10
               timeoutSeconds: 5
@@ -85,53 +90,34 @@ controllers:
 # -- Service configuration
 # @default -- See below
 service:
-  # -- The main service configuration for the Ollama router application.
-  # @default -- See below
+  # -- The main service for the router HTTP API.
   main:
-    # -- The controller that this service should target.
-    # @default -- `main`
     controller: main
-    # -- The ports exposed by the main service.
-    # @default -- See below
     ports:
       http:
-        port: *port # Use the anchored port from liveness probe
+        port: *port
 
-  # -- The metrics service configuration.
-  # This service exposes Prometheus metrics from the application.
-  # @default -- See below
+  # -- The metrics service (Prometheus exposition).
+  # Kept on a separate Service so it can stay cluster-internal even
+  # when the main service is exposed via Ingress.
   metrics:
-    # -- Enable the metrics service.
-    # @default -- `true`
     enabled: true
-    # -- The controller that this service should target.
-    # @default -- `main`
     controller: main
-    # -- The ports for the metrics service.
-    # @default -- See below
     ports:
       metrics:
         port: 9090
 
 # -- Ingress configuration
-# This section defines how external traffic is routed to the services.
+# Disabled by default — enable and set your own host/TLS.
 # @default -- See below
 ingress:
-  # -- The main ingress configuration for the Ollama router.
-  # @default -- See below
   main:
-    # -- Enable the ingress.
-    # @default -- `false`
-    enabled: true
-    # -- The ingress class to use (e.g., "nginx", "traefik"). Uncomment and set if needed.
-    # ingressClassName: "nginx"
-    # -- Annotations for the ingress resource. Uncomment and set if needed (e.g., for cert-manager).
+    enabled: false
+    # ingressClassName: nginx
     # annotations:
-    #   cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    # -- The hosts for the ingress.
-    # @default -- See below
+    #   cert-manager.io/cluster-issuer: letsencrypt-prod
     hosts:
-      - host: "ollama-router.obeone.cloud"
+      - host: ollama-router.example.com
         paths:
           - path: /
             pathType: Prefix
@@ -143,32 +129,34 @@ ingress:
             service:
               identifier: main
               port: http
-    tls: # TLS configuration for the ingress
-      - secretName: obeone-cloud-tls # Name of the Kubernetes secret containing the TLS certificate
+    # tls:
+    #   - secretName: ollama-router-tls
+    #     hosts:
+    #       - ollama-router.example.com
 
+# -- ServiceMonitor for Prometheus Operator.
+# Disabled by default — flip `enabled` if you run the operator.
 serviceMonitor:
   main:
     # -- Enables or disables the serviceMonitor.
     enabled: false
 
-    # -- Override the name suffix that is used for this serviceMonitor.
+    # -- Override the name suffix used for this serviceMonitor.
     nameOverride: ""
 
-    # -- Provide additional annotations which may be required.
+    # -- Additional annotations.
     annotations: {}
 
-    # -- Provide additional labels which may be required.
+    # -- Additional labels.
     labels: {}
 
-    # -- Configures a custom selector for the serviceMonitor, this takes precedence over
-    # specifying a service name.
-    # Helm templates can be used.
+    # -- Custom selector — takes precedence over `serviceName`.
     selector: {}
 
-    # -- Configures the target Service for the serviceMonitor. Helm templates can be used.
+    # -- Target Service for the serviceMonitor. Helm templates allowed.
     serviceName: '{{ include "bjw-s.common.lib.chart.names.fullname" $ }}-metrics'
 
-    # -- Configures the endpoints for the serviceMonitor. Helm templates can be used.
+    # -- Endpoints scraped by the serviceMonitor.
     # @default -- See values.yaml
     endpoints:
       - port: metrics
@@ -177,7 +165,6 @@ serviceMonitor:
         interval: 30s
         scrapeTimeout: 10s
 
-    # -- Configures custom targetLabels for the serviceMonitor. (All collected
-    # meterics will have these labels, taking the value from the target service)
-    # [[ref]](https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/api.md#servicemonitorspec/)
+    # -- Custom target labels copied onto collected metrics.
+    # https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/api.md#servicemonitorspec
     targetLabels: []
