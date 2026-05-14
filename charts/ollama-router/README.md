@@ -1,88 +1,207 @@
-# 🤖 Ollama Router Helm Chart 🚀
+# ⚓ Ollama Router — Helm Chart
 
-A Helm chart for deploying the Ollama model-aware router.
+![Helm](https://img.shields.io/badge/Helm-3.18+-0F1689?logo=helm&logoColor=white)
+![Chart Version](https://img.shields.io/badge/chart-0.3.0-blue)
+![App Version](https://img.shields.io/badge/app-1.1.0-brightgreen)
+![bjw-s common](https://img.shields.io/badge/bjw--s%20common-5.0.0-purple)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## Introduction ✨
+Kubernetes deployment for [`ollama-router`](../../README.md) — a
+model-aware reverse proxy in front of multiple Ollama backends.
 
-This Helm chart deploys the Ollama Router, a smart proxy designed to route requests to multiple Ollama backend nodes. It intelligently distributes model inference requests, performs health checks on backend nodes, and manages model ownership caching for efficient load balancing and fault tolerance.
+---
 
-## Prerequisites 🛠️
+## 🧱 Built on bjw-s `common`
 
-* **Kubernetes**: A running Kubernetes cluster (version 1.19+ recommended).
-* **Helm**: Helm 3.0+ installed.
+This chart is intentionally **thin**. It declares the
+[`bjw-s common`](https://github.com/bjw-s-labs/helm-charts/tree/main/charts/library/common)
+library as its only dependency and delegates rendering of every
+Kubernetes resource (Deployment, Service, Ingress, ServiceMonitor,
+PVC, …) to it.
 
-## Installation 🚀
+```yaml
+# Chart.yaml
+dependencies:
+  - name: common
+    version: 5.0.0
+    repository: https://bjw-s-labs.github.io/helm-charts
+```
 
-To install the `ollama-router` chart:
+```yaml
+# templates/common.yaml
+{{- include "bjw-s.common.loader.all" . }}
+```
 
-1. **Add the Helm repository**:
+That means **everything you can set on a `bjw-s common`-based chart you
+can set here**. The local [`values.yaml`](values.yaml) only documents
+the keys most relevant to this app — for anything else (resources,
+nodeSelector, tolerations, affinity, PVCs, init containers, sidecars,
+extra env, extra Services, NetworkPolicies, HPAs, RBAC, …) refer to
+the upstream documentation:
 
-    ```bash
-    helm repo add obeone https://obeone.org/helm-charts
-    helm repo update
-    ```
+| Resource | Link |
+| --- | --- |
+| 📖 Full values reference | [`bjw-s-labs/helm-charts/.../common/values.yaml`](https://github.com/bjw-s-labs/helm-charts/blob/main/charts/library/common/values.yaml) |
+| 📚 Documentation site | [`bjw-s.dev/helm-charts/docs/common-library/introduction`](https://bjw-s.dev/helm-charts/docs/common-library/introduction/) |
+| 🧪 Examples | [`bjw-s-labs/helm-charts/.../common/examples`](https://github.com/bjw-s-labs/helm-charts/tree/main/charts/library/common/examples) |
+| 📝 Release notes | [`bjw-s-labs/helm-charts releases`](https://github.com/bjw-s-labs/helm-charts/releases?q=common) |
 
-2. **Install the chart**:
+> **5.0.0 breaking changes** — minimum Kubernetes `1.31`, minimum Helm
+> `3.18`, `automountServiceAccountToken` defaults to `false`, and a
+> non-privileged ServiceAccount is created by default. See the
+> [release notes](https://github.com/bjw-s-labs/helm-charts/releases?q=common)
+> for the full list.
 
-    ```bash
-    helm install ollama-router obeone/ollama-router
-    ```
+---
 
-    This command deploys the Ollama Router on your Kubernetes cluster with the default configuration.
+## 📋 Prerequisites
 
-## Configuration ⚙️
+| Requirement | Version |
+| --- | --- |
+| Kubernetes | `1.31+` *(bjw-s common 5.x)* |
+| Helm | `3.18+` *(bjw-s common 5.x)* |
+| Prometheus Operator *(optional)* | needed for `serviceMonitor.main.enabled=true` |
 
-You can customize the deployment by specifying values in a `values.yaml` file or by using the `--set` flag during installation.
+---
 
-Here are some key configurable parameters:
+## 🚀 Installation
 
-| Key                                          | Type    | Default                                                                                               | Description                                                               |
-| :------------------------------------------- | :------ | :---------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------ |
-| `controllers.main.enabled`                   | boolean | `true`                                                                                                | Enable or disable the main controller.                                    |
-| `controllers.main.type`                      | string  | `deployment`                                                                                          | The type of controller to deploy.                                         |
-| `controllers.main.replicas`                  | int     | `1`                                                                                                   | Number of replicas for the Ollama Router.                                 |
-| `controllers.main.strategy`                  | string  | `RollingUpdate`                                                                                       | The strategy to use for deployments.                                      |
-| `controllers.main.containers.main.image.repository` | string | `obeoneorg/ollama-router`                                                                             | Docker image repository for the Ollama Router.                            |
-| `controllers.main.containers.main.image.pullPolicy` | string | `Always`                                                                                              | Image pull policy.                                                        |
-| `controllers.main.containers.main.image.tag`        | string | `latest`                                                                                              | Docker image tag. Leave empty to use `chart.appVersion`.                  |
-| `controllers.main.containers.main.env.LOG_LEVEL` | string | `"info"`                                                                                              | Log level for the application (e.g., `debug`, `info`, `warn`, `error`).   |
-| `controllers.main.containers.main.env.OLLAMA_NODES_JSON` | string | `'[{"name":"ollama1","baseURL":"http://ollama:11434"},{"name":"ollama2","baseURL":"https://ollama2:11434"}]'` | JSON array of Ollama backend nodes to connect to.                         |
-| `controllers.main.containers.main.env.POLL_INTERVAL_SECONDS` | string | `"5"`                                                                                                 | Health check polling interval in seconds.                                 |
-| `controllers.main.containers.main.env.MODEL_CACHE_TTL_SECONDS` | string | `"120"`                                                                                               | Model ownership cache TTL (Time To Live) in seconds.                      |
-| `controllers.main.containers.main.probes.liveness.enabled` | boolean | `true`                                                                                                | Enable the liveness probe.                                                |
-| `controllers.main.containers.main.probes.readiness.enabled` | boolean | `true`                                                                                                | Enable the readiness probe.                                               |
-| `service.main.controller`                    | string  | `main`                                                                                                | The controller that the main service should target.                       |
-| `service.main.ports.http.port`               | int     | `8080`                                                                                                | HTTP port for the main service.                                           |
-| `service.metrics.enabled`                    | boolean | `true`                                                                                                | Enable or disable the metrics service.                                    |
-| `service.metrics.controller`                 | string  | `main`                                                                                                | The controller that the metrics service should target.                    |
-| `service.metrics.ports.metrics.port`         | int     | `9090`                                                                                                | Port for Prometheus metrics.                                              |
-| `ingress.main.enabled`                       | boolean | `true`                                                                                                | Enable or disable the main Ingress resource.                              |
-| `ingress.main.hosts[0].host`                 | string  | `"ollama-router.obeone.cloud"`                                                                        | Hostname for the Ingress.                                                 |
-| `ingress.main.tls[0].secretName`             | string  | `obeone-cloud-tls`                                                                                    | Kubernetes secret name for TLS certificate.                               |
-| `serviceMonitor.main.enabled`                | boolean | `false`                                                                                               | Enables or disables the serviceMonitor.                                   |
-| `serviceMonitor.main.serviceName`            | string  | `{{ include "bjw-s.common.lib.chart.names.fullname" $ }}-metrics` | Configures the target Service for the serviceMonitor. Helm templates can be used. |
-| `serviceMonitor.main.endpoints[0].port`      | string  | `metrics`                                                                                             | The port for the serviceMonitor endpoint.                                 |
-| `serviceMonitor.main.endpoints[0].scheme`    | string  | `http`                                                                                                | The scheme for the serviceMonitor endpoint.                               |
-| `serviceMonitor.main.endpoints[0].path`      | string  | `/metrics`                                                                                            | The path for the serviceMonitor endpoint.                                 |
-| `serviceMonitor.main.endpoints[0].interval`  | string  | `30s`                                                                                                 | The interval at which metrics are scraped.                                |
-| `serviceMonitor.main.endpoints[0].scrapeTimeout` | string | `10s`                                                                                                 | The scrape timeout for the serviceMonitor endpoint.                       |
+```bash
+helm repo add obeone https://obeone.org/helm-charts
+helm repo update
+helm install ollama-router obeone/ollama-router
+```
 
-A comprehensive list of configurable options can be found in the `values.yaml` file and the upstream `common` library chart's `values.yaml` documentation.
+With a values file:
 
-## Upgrading ⬆️
+```bash
+helm install ollama-router obeone/ollama-router -f my-values.yaml
+```
 
-To upgrade the chart to a newer version:
+Inline override of the backend list:
+
+```bash
+helm install ollama-router obeone/ollama-router \
+  --set-string controllers.main.containers.main.env.OLLAMA_NODES_JSON='[{"name":"n1","baseURL":"http://ollama:11434"}]'
+```
+
+---
+
+## 🐳 Image Sources
+
+Public images are mirrored to two registries:
+
+| Registry | Repository |
+| --- | --- |
+| Docker Hub | `obeoneorg/ollama-router` |
+| GHCR | `ghcr.io/obeone/ollama-router` |
+
+The chart defaults to `ghcr.io/obeone/ollama-router:latest`.
+
+---
+
+## ⚙️ App-specific Values
+
+This is the **short list** — everything else (resources, nodeSelector,
+tolerations, affinity, persistence, PVCs, sidecars, init containers,
+HPAs, NetworkPolicies, RBAC, RawResources, …) is inherited from
+[`bjw-s common`](https://github.com/bjw-s-labs/helm-charts/blob/main/charts/library/common/values.yaml)
+— refer to the upstream values file for the full surface.
+
+### Image
+
+| Key | Default |
+| --- | --- |
+| `controllers.main.containers.main.image.repository` | `ghcr.io/obeone/ollama-router` |
+| `controllers.main.containers.main.image.tag` | `latest` *(empty → `chart.appVersion`)* |
+| `controllers.main.containers.main.image.pullPolicy` | `IfNotPresent` |
+
+### Application environment
+
+Passed straight through to the binary — see the root
+[README](../../README.md#%EF%B8%8F-configuration) for semantics.
+
+| Key | Default |
+| --- | --- |
+| `…env.OLLAMA_NODES_JSON` | example two-node list — **override before deploying** |
+| `…env.LOG_LEVEL` | `"info"` |
+| `…env.POLL_INTERVAL_SECONDS` | `"5"` |
+| `…env.MODEL_CACHE_TTL_SECONDS` | `"120"` |
+
+> Scaling `controllers.main.replicas` past `1` trades cache locality
+> (sessions are pinned in-memory per pod) for HA. Pick your battle.
+
+### Probes & ports
+
+Liveness and readiness both hit `GET /healthz` on port `8080`. The
+metrics Service exposes `:9090/metrics` on a separate Service so it
+can stay cluster-internal even when the main one is exposed.
+
+### Ingress & ServiceMonitor
+
+Both disabled by default in the example values. The chart wires them
+up via the bjw-s `ingress` and `serviceMonitor` blocks — see the
+upstream docs for the full schema.
+
+---
+
+## 🧪 Example `values.yaml`
+
+```yaml
+controllers:
+  main:
+    replicas: 2
+    containers:
+      main:
+        image:
+          repository: ghcr.io/obeone/ollama-router
+          tag: latest
+        env:
+          LOG_LEVEL: "info"
+          OLLAMA_NODES_JSON: |
+            [
+              {"name":"gpu-1","baseURL":"http://ollama-gpu-1:11434"},
+              {"name":"gpu-2","baseURL":"http://ollama-gpu-2:11434"}
+            ]
+
+ingress:
+  main:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - host: ollama.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+            service: { identifier: main, port: http }
+          - path: /v1
+            pathType: Prefix
+            service: { identifier: main, port: http }
+    tls:
+      - secretName: ollama-example-tls
+        hosts: [ ollama.example.com ]
+
+serviceMonitor:
+  main:
+    enabled: true
+```
+
+---
+
+## ⬆️ Upgrading
 
 ```bash
 helm upgrade ollama-router obeone/ollama-router --install --atomic
 ```
 
-## Uninstalling 🗑️
-
-To uninstall the `ollama-router` chart:
+## 🗑️ Uninstalling
 
 ```bash
 helm uninstall ollama-router
 ```
 
-This command removes all the Kubernetes components associated with the chart and deletes the release.
+---
+
+## 📝 License
+
+MIT — same as the parent project.
