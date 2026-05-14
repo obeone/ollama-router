@@ -1,89 +1,189 @@
-# 🧠 Ollama Router 🚀
+# 🧠 Ollama Router
 
-The Ollama Router is an intelligent, model-aware proxy designed to efficiently manage and route inference requests to multiple Ollama backend nodes. It acts as a central entry point for your applications, providing advanced load balancing, health checking, and model ownership caching to ensure optimal performance, reliability, and scalability for your Ollama deployments.
+![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
+![Docker Hub](https://img.shields.io/badge/Docker%20Hub-obeoneorg%2Follama--router-2496ED?logo=docker&logoColor=white)
+![GHCR](https://img.shields.io/badge/GHCR-obeone%2Follama--router-181717?logo=github&logoColor=white)
+![Helm](https://img.shields.io/badge/Helm-Chart-0F1689?logo=helm&logoColor=white)
+![Prometheus](https://img.shields.io/badge/Prometheus-Metrics-E6522C?logo=prometheus&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## ✨ Features
+Model-aware reverse proxy that load-balances inference traffic across a
+fleet of Ollama backends, with health checking, latency tracking, and
+session pinning via a TTL'd model-ownership cache.
 
-* **Model-Aware Routing**: Routes inference requests to the appropriate Ollama backend based on model availability and node health.
-* **Load Balancing**: Distributes requests across multiple Ollama nodes to prevent overload and ensure efficient resource utilization.
-* **Health Checks**: Continuously monitors the health and responsiveness of backend Ollama nodes, automatically removing unhealthy nodes from rotation.
-* **Model Ownership Caching**: Caches information about which models are loaded on which nodes, reducing redundant requests and improving response times.
-* **Scalability**: Easily scale your Ollama infrastructure by adding more backend nodes without reconfiguring your client applications.
-* **Fault Tolerance**: Automatically handles node failures by redirecting requests to healthy nodes, ensuring high availability.
-* **Prometheus Metrics**: Exposes detailed metrics for monitoring router performance and backend node status.
+The routing decision picks in this order:
 
-## 🚀 Getting Started
+1. **Cache hit** — session already pinned to a node (TTL-gated)
+2. **Loaded in VRAM** — node has the model resident
+3. **Local on disk** — node has the model, no warm-up cost vs pulling
+4. **Least busy** — fewest loaded models, lower latency as tie-breaker
 
-To get the Ollama Router up and running, follow these steps:
+---
 
-### Prerequisites
+## 🚀 Features
 
-* Go (version 1.22 or newer)
-* Docker (for building and running containerized)
-* Access to Ollama backend nodes
+| Feature | Description |
+| --- | --- |
+| 🎯 **Model-aware routing** | Routes by model availability across the fleet (`HIT_CACHE`, `HIT_LOADED`, `HIT_LOCAL`, `FALLBACK_LEAST_BUSY`) |
+| ⚖️ **Load balancing** | Tie-breaks on loaded model count, then latency |
+| ❤️ **Health checks** | Concurrent `/api/ps` + `/api/tags` polling; unhealthy nodes drop out automatically |
+| 🧠 **Ownership cache** | `sync.Map` with TTL keeps follow-up requests sticky to the warm node |
+| 🔀 **Native + OpenAI APIs** | `/api/generate\|chat\|embeddings` and `/v1/chat/completions\|embeddings\|models` |
+| 📦 **Smart `pull`/`push`/`copy`/`show`** | Per-verb routing respecting where the model actually lives |
+| 📣 **Broadcast `delete`** | Fans out to every healthy node, returns first 2xx/3xx |
+| 📊 **Prometheus metrics** | Routing decisions, request rates, node health/latency gauges on a separate port |
+| 🛡️ **Graceful shutdown** | SIGINT/SIGTERM, context cancel, background refresher join |
 
-### Installation
+---
 
-1. **Clone the repository**:
+## 📦 Installation
 
-    ```bash
-    git clone https://github.com/obeone/ollama-router.git
-    cd ollama-router
-    ```
+### 🐳 Docker (recommended)
 
-2. **Build the application**:
+Pre-built multi-arch images are published to both registries:
 
-    ```bash
-    go build -o ollama-router .
-    ```
+| Registry | Image |
+| --- | --- |
+| Docker Hub | `obeoneorg/ollama-router` |
+| GHCR | `ghcr.io/obeone/ollama-router` |
 
-3. **Run the application**:
-    You need to configure the Ollama backend nodes using the `OLLAMA_NODES_JSON` environment variable.
+```bash
+docker run --rm -p 8080:8080 -p 9090:9090 \
+  -e OLLAMA_NODES_JSON='[{"name":"ollama1","baseURL":"http://host.docker.internal:11434"}]' \
+  obeoneorg/ollama-router:latest
+```
 
-    ```bash
-    OLLAMA_NODES_JSON='[{"name":"ollama1","baseURL":"http://localhost:11434"}]' ./ollama-router
-    ```
+Or build it yourself — static binary on `gcr.io/distroless/static-debian12`
+(see [`Dockerfile`](Dockerfile)):
 
-    Replace the `baseURL` with the actual URLs of your Ollama instances.
+```bash
+docker build -t ollama-router .
+```
 
-### Docker
+### ⚓ Helm
 
-You can also build and run the Ollama Router using Docker:
+```bash
+helm install ollama-router ./charts/ollama-router \
+  --set 'config.ollamaNodes[0].name=ollama1' \
+  --set 'config.ollamaNodes[0].baseURL=http://ollama1.svc:11434'
+```
 
-1. **Build the Docker image**:
+See [`charts/ollama-router/`](charts/ollama-router/) for the full values
+schema.
 
-    ```bash
-    docker build -t ollama-router .
-    ```
+### 🛠️ Local build
 
-2. **Run the Docker container**:
+```bash
+go build -o ollama-router .
+OLLAMA_NODES_JSON='[{"name":"n1","baseURL":"http://localhost:11434"}]' ./ollama-router
+```
 
-    ```bash
-    docker run -p 8080:8080 -e OLLAMA_NODES_JSON='[{"name":"ollama1","baseURL":"http://host.docker.internal:11434"}]' ollama-router
-    ```
-
-    * `host.docker.internal` is used to access the host machine's localhost from within the Docker container. Ensure your Ollama backend is accessible at this address.
-    * Adjust the port mapping (`-p 8080:8080`) if needed.
-
-## 🐳 Helm Chart Deployment
-
-For Kubernetes deployments, a Helm chart is available:
-
-Navigate to the [`charts/ollama-router/`](charts/ollama-router/) directory for detailed instructions on how to deploy the Ollama Router using Helm.
+---
 
 ## ⚙️ Configuration
 
-The Ollama Router can be configured via environment variables:
+All configuration is environment-driven.
 
-* `LOG_LEVEL`: Sets the logging level (e.g., `debug`, `info`, `warn`, `error`). Default is `info`.
-* `OLLAMA_NODES_JSON`: A JSON array specifying the Ollama backend nodes. Example: `[{"name":"ollama1","baseURL":"http://ollama1.example.com"},{"name":"ollama2","baseURL":"http://ollama2.example.com"}]`.
-* `POLL_INTERVAL_SECONDS`: The interval (in seconds) for health checks of Ollama nodes. Default is `5`.
-* `MODEL_CACHE_TTL_SECONDS`: Time-to-live (in seconds) for the model ownership cache. Default is `120`.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OLLAMA_NODES_JSON` | demo nodes | JSON list of `{name, baseURL}` backends — **required in prod** |
+| `LISTEN_ADDR` | `:8080` | Main proxy listen address |
+| `METRICS_ADDR` | `:9090` | Prometheus listen address (separate mux) |
+| `POLL_INTERVAL_SECONDS` | `5` | Background health-check interval |
+| `MODEL_CACHE_TTL_SECONDS` | `120` | TTL for the model-ownership cache |
+| `CONNECT_TIMEOUT_SECONDS` | `5` | Backend connect timeout |
+| `READ_TIMEOUT_SECONDS` | `600` | Backend read timeout (long for streaming) |
+| `LOG_LEVEL` | `debug` | `debug` · `info` · `warn` · `error` |
+
+### Nodes example
+
+```json
+[
+  { "name": "ollama1", "baseURL": "http://ollama1.internal:11434" },
+  { "name": "ollama2", "baseURL": "http://ollama2.internal:11434" }
+]
+```
+
+---
+
+## 🌐 Endpoints
+
+| Path | Method | Behavior |
+| --- | --- | --- |
+| `/` | `GET` · `HEAD` | Returns `Ollama is running` (CLI compat) |
+| `/healthz` | `GET` | Per-node state + cache size |
+| `/api/generate` · `/api/chat` · `/api/embeddings` | `POST` | Model-aware proxy |
+| `/v1/chat/completions` · `/v1/embeddings` | `POST` | OpenAI-compatible, model-aware |
+| `/v1/models` | `GET` | OpenAI-format aggregated tags |
+| `/api/tags` · `/api/ps` | `GET` · `POST` | Aggregated/deduped across nodes |
+| `/api/pull` · `/api/push` · `/api/copy` · `/api/create` · `/api/show` | `POST` | Specific routing per verb |
+| `/api/delete` | `POST` | Broadcast to all healthy nodes |
+| `/api/version` | `GET` | Proxied to the least-busy healthy node |
+| `/api/*` | any | Catch-all: model-aware for POST, else least-busy |
+| `/metrics` *(on `METRICS_ADDR`)* | `GET` | Prometheus exposition |
+
+---
+
+## 🧪 Development
+
+| Command | Purpose |
+| --- | --- |
+| `go build -o ollama-router .` | Build the binary |
+| `go vet ./...` | Static checks |
+| `go test ./...` | Run all tests |
+| `go test -run TestChooseNodeForModel ./...` | Run a single test |
+| `go run .` | Run with default demo nodes |
+| `docker build -t ollama-router .` | Build the container image |
+
+The code is a flat `package main` — one file per concern
+(`routing.go`, `handlers.go`, `state.go`, `metrics.go`, …). See
+[`CLAUDE.md`](CLAUDE.md) for the architectural invariants.
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TB
+    Client[Client<br/>ollama CLI · OpenAI SDK · curl]
+    Router[Ollama Router<br/>Chi · :8080]
+    Metrics[Prometheus<br/>:9090/metrics]
+    Cache[(Model-Owner Cache<br/>sync.Map · TTL)]
+    Refresher[Background Refresher<br/>/api/ps · /api/tags]
+
+    subgraph Backends [Ollama Backends]
+        N1[ollama1]
+        N2[ollama2]
+        N3[ollama-N]
+    end
+
+    Client -->|/api/* · /v1/*| Router
+    Router <-->|lookup / pin| Cache
+    Router -->|proxy| N1
+    Router -->|proxy| N2
+    Router -->|proxy| N3
+    Refresher -->|poll| N1 & N2 & N3
+    Refresher -->|state + metrics| Router
+    Router -.->|gauges + counters| Metrics
+```
+
+---
+
+## 📊 Observability
+
+- Prometheus metrics on a **separate** server (`METRICS_ADDR`, default `:9090`)
+- Counters: `routing_decisions_total{decision,model}`, request totals
+- Gauges per node: `node_health`, `node_latency_ms`, `node_loaded_models`
+- Structured logs via `slog` + [`tint`](https://github.com/lmittmann/tint)
+- `/healthz` for liveness/readiness probes
+
+---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to open issues or submit pull requests.
+Issues and PRs welcome. Keep changes focused and add a test that fails
+on the old behavior when fixing a bug.
 
-## 📄 License
+## 📝 License
 
-This project is licensed under the MIT License.
+MIT — see source headers.
