@@ -3,7 +3,7 @@ module ollama-router
 go 1.22
 
 require (
-	github.com/go-chi/chi/v5 v5.0.12
+	github.com/go-chi/chi/v5 v5.2.2
 	github.com/lmittmann/tint v1.0.4
 	github.com/prometheus/client_golang v1.19.1
 )
