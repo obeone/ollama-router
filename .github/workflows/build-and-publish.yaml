@@ -1,0 +1,90 @@
+name: Build and Push Docker image
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # For cosign
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set Docker image tags
+        id: docker_tags
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          TAGS="ghcr.io/obeone/ollama-router:latest\ndocker.io/obeoneorg/ollama-router:latest"
+          if [ "$EVENT_NAME" = "release" ] && [ -n "$RELEASE_TAG" ]; then
+            TAGS="$TAGS\nghcr.io/obeone/ollama-router:${RELEASE_TAG}\ndocker.io/obeoneorg/ollama-router:${RELEASE_TAG}"
+          fi
+
+          {
+            echo "tags<<EOF"
+            echo -e "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        id: docker_build
+        with:
+          context: .
+          push: true
+          file: ./Dockerfile
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ steps.docker_tags.outputs.tags }}
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the container image with cosign
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+          DIGEST: ${{ steps.docker_build.outputs.digest }}
+        run: |
+          cosign sign --yes "ghcr.io/obeone/ollama-router@${DIGEST}"
+          cosign sign --yes "docker.io/obeoneorg/ollama-router@${DIGEST}"
+
+      - name: Update Docker Hub description
+        if: github.event_name == 'release' || github.ref == 'refs/heads/main'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: obeoneorg/ollama-router
