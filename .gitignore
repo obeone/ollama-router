@@ -1,0 +1,13 @@
+# Build output
+/ollama-router
+
+# Local Helm overrides
+charts/**/values_local.yaml
+charts/**/values_local.*.yaml
+
+# Editor / OS
+.DS_Store
+.history/
+.idea/
+.vscode/
+*.swp
