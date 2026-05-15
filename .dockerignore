@@ -1,2 +1,18 @@
+# VCS and CI
+.git/
+.github/
+.gitignore
+
+# Build artifacts
+ollama-router
+
+# Not needed in the image / would bust the COPY . . cache layer
 charts/
 .history/
+.worktrees/
+.omc/
+.claude/
+*.md
+LICENSE
+Dockerfile
+.dockerignore
