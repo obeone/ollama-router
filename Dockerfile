@@ -1,37 +1,47 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build Stage ----
-# Use the official Go image as a builder.
-FROM golang:1.22-alpine AS builder
+# Build on the native BUILDPLATFORM and cross-compile to the requested
+# target. For a static Go binary this is far faster than running the
+# whole toolchain under QEMU emulation on multi-arch builds.
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS builder
 
-# Set the working directory inside the container.
+# Injected automatically by BuildKit for the requested target platform.
+ARG TARGETOS
+ARG TARGETARCH
+
 WORKDIR /app
 
-# Copy Go module and source files.
+# Resolve modules first so this layer stays cached until go.mod/go.sum change.
 COPY --link go.mod go.sum ./
-# Download Go module dependencies.
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    go mod download
 
-# Copy the rest of the application's source code.
+# Build a static, cross-compiled, reproducible binary.
 COPY --link . .
-
-# Build the application statically.
-# CGO_ENABLED=0 disables Cgo to create a static binary.
-# -ldflags="-w -s" removes debug information to reduce binary size.
-RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /ollama-router .
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-w -s" -o /ollama-router .
 
 # ---- Final Stage ----
-# Use a minimal, non-root base image for the final container.
-# "distroless" images contain only the application and its runtime dependencies.
-FROM gcr.io/distroless/static-debian12
+# distroless static + nonroot: no shell, no package manager, runs as
+# uid 65532. No HEALTHCHECK: the image has no shell/curl/wget, so health
+# is checked by the orchestrator (Helm probes hit /healthz).
+FROM gcr.io/distroless/static-debian12:nonroot
+
+ARG VERSION=dev
+LABEL org.opencontainers.image.source="https://github.com/obeone/ollama-router" \
+      org.opencontainers.image.description="Model-aware reverse proxy in front of N Ollama backends" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}"
 
 # Copy the static binary from the builder stage.
 COPY --from=builder /ollama-router /ollama-router
 
-# Expose the port the app runs on.
+# Main router and the separate Prometheus metrics server.
 EXPOSE 8080
-# Expose the metrics port.
 EXPOSE 9090
 
-# Set the binary as the entrypoint.
+USER nonroot
 ENTRYPOINT ["/ollama-router"]
