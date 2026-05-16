@@ -30,11 +30,14 @@ func setupRoutes(r *chi.Mux, appState *AppState) {
 	r.Post("/api/generate", appState.handleModelAwareProxy)
 	r.Post("/api/chat", appState.handleModelAwareProxy)
 	r.Post("/api/embeddings", appState.handleModelAwareProxy)
+	r.Post("/api/embed", appState.handleModelAwareProxy)
 
 	// Model-aware routing for OpenAI-compatible API
 	r.Post("/v1/chat/completions", appState.handleModelAwareProxy)
+	r.Post("/v1/completions", appState.handleModelAwareProxy)
 	r.Post("/v1/embeddings", appState.handleModelAwareProxy)
 	r.Get("/v1/models", appState.handleOpenAIModels)
+	r.Get("/v1/models/*", appState.handleOpenAIModel)
 
 	// Specific routing logic
 	r.Post("/api/pull", appState.handlePull)
@@ -401,6 +404,37 @@ func (appState *AppState) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondError(w, http.StatusBadGateway, fmt.Sprintf("delete failed on all nodes: %v", lastError))
+}
+
+// handleOpenAIModel returns a single OpenAI-compatible model object by id, or a 404 error if the model is not found.
+func (appState *AppState) handleOpenAIModel(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "*")
+
+	tagsResponse, err := appState.aggregateTags(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to aggregate models from nodes")
+		return
+	}
+
+	for _, ollamaModel := range tagsResponse.Models {
+		if ollamaModel.Name == id {
+			respondJSON(w, http.StatusOK, OpenAIModel{
+				ID:      ollamaModel.Name,
+				Object:  "model",
+				Created: ollamaModel.ModifiedAt.Unix(),
+				OwnedBy: "ollama",
+			})
+			return
+		}
+	}
+
+	respondJSON(w, http.StatusNotFound, map[string]any{
+		"error": map[string]string{
+			"message": fmt.Sprintf("model '%s' not found", id),
+			"type":    "invalid_request_error",
+			"code":    "model_not_found",
+		},
+	})
 }
 
 // handleCatchAll proxies any other unhandled /api/ requests.
