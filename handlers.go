@@ -23,7 +23,7 @@ func setupRoutes(r *chi.Mux, appState *AppState) {
 
 	// Aggregated endpoints
 	r.Get("/api/tags", appState.handleAggregateTags)
-	r.Post("/api/ps", appState.handleAggregatePS)
+	r.Get("/api/ps", appState.handleAggregatePS)
 	r.Get("/api/version", appState.handleVersion)
 
 	// Model-aware routing for native Ollama API
@@ -47,7 +47,7 @@ func setupRoutes(r *chi.Mux, appState *AppState) {
 	r.Post("/api/show", appState.handleShow)
 
 	// Broadcast
-	r.Post("/api/delete", appState.handleDelete)
+	r.Delete("/api/delete", appState.handleDelete)
 
 	// Catch-all for other /api/ endpoints
 	r.Handle("/api/*", http.HandlerFunc(appState.handleCatchAll))
@@ -195,7 +195,7 @@ func (appState *AppState) handleAggregatePS(w http.ResponseWriter, r *http.Reque
 		wg.Add(1)
 		go func(ns *NodeState) {
 			defer wg.Done()
-			ps, err := fetchAPI[OllamaPSResponse](r.Context(), appState.Client, http.MethodPost, ns.BaseURL.String()+"/api/ps", nil)
+			ps, err := fetchAPI[OllamaPSResponse](r.Context(), appState.Client, http.MethodGet, ns.BaseURL.String()+"/api/ps", nil)
 			if err != nil || ps == nil {
 				return
 			}
@@ -362,7 +362,7 @@ func (appState *AppState) handleDelete(w http.ResponseWriter, r *http.Request) {
 		go func(ns *NodeState) {
 			defer wg.Done()
 			reqURL := ns.BaseURL.JoinPath("/api/delete")
-			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, reqURL.String(), bytes.NewReader(bodyBytes))
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodDelete, reqURL.String(), bytes.NewReader(bodyBytes))
 			if err != nil {
 				resultChan <- result{err: err}
 				return
