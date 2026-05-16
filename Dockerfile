@@ -22,7 +22,7 @@ COPY --link . .
 RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-w -s" -o /ollama-router .
+    go build -trimpath -ldflags="-w -s" -o /ollama-router ./cmd/ollama-router
 
 # ---- Final Stage ----
 # distroless static + nonroot: no shell, no package manager, runs as
