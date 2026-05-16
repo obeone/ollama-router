@@ -76,6 +76,30 @@ func (appState *AppState) leastBusyHealthyNode() *NodeState {
 	return _chooseBestNode(healthy)
 }
 
+// stableHealthyNode returns a deterministically chosen healthy node: the
+// first healthy node ordered by Name. Pinning a multi-step sequence
+// (blob upload then /api/create) to this node keeps every step
+// co-located on one backend, which `ollama create` from a local gguf
+// requires.
+func (appState *AppState) stableHealthyNode() *NodeState {
+	healthy := make([]*NodeState, 0, len(appState.NodeStates))
+	for _, ns := range appState.NodeStates {
+		ns.mu.RLock()
+		ok := ns.OK
+		ns.mu.RUnlock()
+		if ok {
+			healthy = append(healthy, ns)
+		}
+	}
+	if len(healthy) == 0 {
+		return nil
+	}
+	sort.Slice(healthy, func(i, j int) bool {
+		return healthy[i].Name < healthy[j].Name
+	})
+	return healthy[0]
+}
+
 // chooseNodeForModel implements the main routing logic for a given model.
 // It prioritizes nodes with the model already loaded, then nodes with the model on disk,
 // and finally falls back to the least busy healthy node. It also utilizes a cache for efficiency.
