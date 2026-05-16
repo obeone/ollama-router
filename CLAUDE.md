@@ -43,10 +43,10 @@ The router is a stateful model-aware reverse proxy in front of N Ollama backends
 
   "Best" = fewest loaded models, tie-broken by lower latency (`_chooseBestNode`). Variants: `chooseNodeForPull`, `chooseNodeWithModel` (push/copy — must have model locally), `chooseNodeWithModelOrLoaded` (show).
 - `handlers.go` — Chi routes. Handler shapes:
-  - Model-aware proxy (`/api/generate|chat|embeddings`, `/v1/chat/completions`, `/v1/embeddings`) reads+restores body, extracts model, picks node, proxies.
-  - Aggregators (`/api/tags`, `/api/ps`, `/v1/models`) fan out across nodes and dedupe/union; `/v1/models` reuses `aggregateTags` and reshapes to OpenAI format.
+  - Model-aware proxy (`/api/generate|chat|embeddings|embed`, `/v1/chat/completions`, `/v1/embeddings`) reads+restores body, extracts model, picks node, proxies.
+  - Aggregators (`/api/tags` GET, `/api/ps` GET, `/v1/models`) fan out across nodes and dedupe/union; `/v1/models` reuses `aggregateTags` and reshapes to OpenAI format.
   - Specific routing (`pull`/`push`/`copy`/`create`/`show`) uses the matching `choose*` helper.
-  - `/api/delete` broadcasts and forwards the first 2xx/3xx response (closes losing response bodies).
+  - `DELETE /api/delete` broadcasts to all healthy nodes using DELETE and forwards the first 2xx/3xx response (closes losing response bodies).
   - `/api/version` proxies to the least-busy healthy node.
   - `/api/*` catch-all tries model-aware for POST, else least-busy.
   - `GET|HEAD /` returns `Ollama is running` for `ollama` CLI compatibility; `/healthz` exposes per-node state + cache size.
