@@ -44,6 +44,8 @@ func setupRoutes(r *chi.Mux, appState *AppState) {
 	r.Post("/api/push", appState.handlePush)
 	r.Post("/api/copy", appState.handleCopy)
 	r.Post("/api/create", appState.handleCreate)
+	r.Head("/api/blobs/*", appState.handleBlob)
+	r.Post("/api/blobs/*", appState.handleBlob)
 	r.Post("/api/show", appState.handleShow)
 
 	// Broadcast
@@ -304,14 +306,28 @@ func (appState *AppState) handleCopy(w http.ResponseWriter, r *http.Request) {
 	appState.proxyRequest(w, r, node)
 }
 
-// handleCreate routes a create request to the least busy healthy node.
+// handleCreate routes a create request to a deterministically chosen stable node
+// so it lands on the same backend as the preceding blob uploads.
 func (appState *AppState) handleCreate(w http.ResponseWriter, r *http.Request) {
-	node := appState.leastBusyHealthyNode()
+	node := appState.stableHealthyNode()
 	if node == nil {
 		respondError(w, http.StatusServiceUnavailable, "no healthy backend available for create")
 		return
 	}
 	logger.Info("Routing create request", "node", node.Name)
+	appState.proxyRequest(w, r, node)
+}
+
+// handleBlob pins blob existence checks (HEAD) and uploads (POST) to a
+// single deterministically chosen node so they stay co-located with the
+// subsequent /api/create on the same backend.
+func (appState *AppState) handleBlob(w http.ResponseWriter, r *http.Request) {
+	node := appState.stableHealthyNode()
+	if node == nil {
+		respondError(w, http.StatusServiceUnavailable, "no healthy backend available for blob")
+		return
+	}
+	logger.Info("Routing blob request", "method", r.Method, "path", r.URL.Path, "node", node.Name)
 	appState.proxyRequest(w, r, node)
 }
 
