@@ -142,7 +142,7 @@ func (appState *AppState) refreshNodeState(ctx context.Context, state *NodeState
 	fetchWg.Add(2)
 	go func() {
 		defer fetchWg.Done()
-		psResp, psErr = fetchAPI[OllamaPSResponse](ctx, appState.Client, http.MethodPost, state.BaseURL.String()+"/api/ps", nil)
+		psResp, psErr = fetchAPI[OllamaPSResponse](ctx, appState.Client, http.MethodGet, state.BaseURL.String()+"/api/ps", nil)
 	}()
 	go func() {
 		defer fetchWg.Done()
