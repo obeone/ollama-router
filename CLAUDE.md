@@ -4,15 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Build, run, and test (Go 1.22, flat `package main` layout — no subpackages):
+Build, run, and test (Go 1.22, flat `package main` layout — no subpackages, sources under `cmd/ollama-router/`):
 
 ```bash
-go build -o ollama-router .
+go build -o ollama-router ./cmd/ollama-router
 go vet ./...
 go test ./...                              # routing_test.go covers cache, _chooseBestNode, choose* helpers
 go test -run TestChooseNodeForModel ./...  # single test
-go run .                                   # uses OLLAMA_NODES_JSON default (obeone.cloud hosts)
-OLLAMA_NODES_JSON='[{"name":"n1","baseURL":"http://localhost:11434"}]' go run .
+go run ./cmd/ollama-router                 # uses OLLAMA_NODES_JSON default (obeone.cloud hosts)
+OLLAMA_NODES_JSON='[{"name":"n1","baseURL":"http://localhost:11434"}]' go run ./cmd/ollama-router
 docker build -t ollama-router .
 ```
 

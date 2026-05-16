@@ -74,7 +74,7 @@ schema.
 ### 🛠️ Local build
 
 ```bash
-go build -o ollama-router .
+go build -o ollama-router ./cmd/ollama-router
 OLLAMA_NODES_JSON='[{"name":"n1","baseURL":"http://localhost:11434"}]' ./ollama-router
 ```
 
@@ -128,11 +128,11 @@ All configuration is environment-driven.
 
 | Command | Purpose |
 | --- | --- |
-| `go build -o ollama-router .` | Build the binary |
+| `go build -o ollama-router ./cmd/ollama-router` | Build the binary |
 | `go vet ./...` | Static checks |
 | `go test ./...` | Run all tests |
 | `go test -run TestChooseNodeForModel ./...` | Run a single test |
-| `go run .` | Run with default demo nodes |
+| `go run ./cmd/ollama-router` | Run with default demo nodes |
 | `docker build -t ollama-router .` | Build the container image |
 
 The code is a flat `package main` — one file per concern
