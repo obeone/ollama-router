@@ -4,9 +4,10 @@
 
 **A model-aware reverse proxy that turns a fleet of Ollama backends into one smart endpoint.**
 
-Point your `ollama` CLI or any OpenAI SDK at a single URL — the router decides
-*which* backend should serve each request based on where the model is warm,
-where it lives on disk, and which node is least busy.
+Point the `ollama` CLI, any Ollama client library (ollama-python,
+ollama-js, Open WebUI, …), or any OpenAI SDK at a single URL — the router
+decides *which* backend should serve each request based on where the model
+is warm, where it lives on disk, and which node is least busy.
 
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 ![Docker Hub](https://img.shields.io/badge/Docker%20Hub-obeoneorg%2Follama--router-2496ED?logo=docker&logoColor=white)
