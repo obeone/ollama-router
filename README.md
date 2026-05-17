@@ -210,17 +210,27 @@ POST /api/blobs/sha256:…   →  upload the layer
 POST /api/create           →  assemble the model from uploaded layers
 ```
 
-On a fleet, those three calls must hit the **same** backend — otherwise the
-blob is uploaded to node A and `create` runs on node B with no layer to find.
-The router pins the whole sequence (`HEAD`/`POST /api/blobs/*` **and**
-`/api/create`) to one deterministically chosen healthy node, so local-gguf
-creates just work.
+Blob uploads (`HEAD`/`POST /api/blobs/*`) are always pinned to one
+deterministically chosen healthy node, so the layer and the subsequent
+`/api/create` are guaranteed to land on the same backend.
+
+The router then picks the `/api/create` target based on how many nodes
+already have that model on disk:
+
+| Owners | Routing decision | Why |
+|--------|-----------------|-----|
+| **0** — brand-new model | Pinned to the stable node (same as blobs) | Keeps blob upload and create co-located; avoids a multi-GB buffer |
+| **1** — model exists on one node | Routed to that node | In-place rebuild; no cross-node copy needed |
+| **≥ 2** — model replicated | Broadcast to **all** owning nodes concurrently | Every replica is rebuilt consistently; first success is streamed back, others are drained so the operation completes |
 
 > [!NOTE]
-> **Trade-off (by design):** pinning is single-node — `create` traffic is not
-> load-balanced, and a health flap of the pinned node mid-handshake aborts the
-> in-flight create. This was chosen over broadcast-to-all to keep a single
-> upload with zero buffering of multi-GB blobs.
+> The router never replicates a brand-new model across nodes by itself.
+> To install the same model on two (or more) specific nodes, point
+> `OLLAMA_HOST` directly at each target node (bypassing the router) and
+> run `ollama create` once per node. After the next poll tick
+> (~`POLL_INTERVAL_SECONDS`) the router detects the model on those nodes,
+> and from then on any re-`create` fans out automatically (the ≥ 2 owners
+> case above).
 
 ---
 
