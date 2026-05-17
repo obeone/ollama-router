@@ -64,4 +64,4 @@ The router is a stateful model-aware reverse proxy in front of N Ollama backends
 
 ## Deployment
 
-`Dockerfile` does a static build (`CGO_ENABLED=0`, `-ldflags="-w -s"`) into `gcr.io/distroless/static-debian12`. Helm chart lives in `charts/ollama-router/`.
+`Dockerfile` does a static build (`CGO_ENABLED=0`, `-ldflags="-w -s"`) into `gcr.io/distroless/static-debian13`. Helm chart lives in `charts/ollama-router/`.

@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
 # distroless static + nonroot: no shell, no package manager, runs as
 # uid 65532. No HEALTHCHECK: the image has no shell/curl/wget, so health
 # is checked by the orchestrator (Helm probes hit /healthz).
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 
 ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/obeone/ollama-router" \
