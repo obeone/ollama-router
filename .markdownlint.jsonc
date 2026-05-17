@@ -1,0 +1,16 @@
+{
+  // Project markdownlint config.
+  //
+  // The README intentionally opens with a centered banner and uses
+  // <details>/<summary> for collapsible examples — a deliberate, widely
+  // used pattern for polished GitHub READMEs. These two rules conflict
+  // with that and are disabled project-wide; every other default rule
+  // stays on so Markdown remains clean.
+  "default": true,
+
+  // MD033 — inline HTML (centered <div>, badges, <details>/<summary>).
+  "MD033": false,
+
+  // MD041 — first line must be an H1 (the centered banner precedes it).
+  "MD041": false
+}
