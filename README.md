@@ -204,7 +204,7 @@ the upstream-correct method (e.g. `GET /api/ps`, `DELETE /api/delete`).
 
 `ollama create` from a local `gguf` is a **three-step handshake**:
 
-```
+```text
 HEAD /api/blobs/sha256:…   →  does this layer exist?
 POST /api/blobs/sha256:…   →  upload the layer
 POST /api/create           →  assemble the model from uploaded layers
@@ -218,7 +218,7 @@ The router then picks the `/api/create` target based on how many nodes
 already have that model on disk:
 
 | Owners | Routing decision | Why |
-|--------|-----------------|-----|
+| --- | --- | --- |
 | **0** — brand-new model | Pinned to the stable node (same as blobs) | Keeps blob upload and create co-located; avoids a multi-GB buffer |
 | **1** — model exists on one node | Routed to that node | In-place rebuild; no cross-node copy needed |
 | **≥ 2** — model replicated | Broadcast to **all** owning nodes concurrently | Every replica is rebuilt consistently; first success is streamed back, others are drained so the operation completes |
@@ -329,4 +329,4 @@ regression test that fails on the old behavior and passes on the fix.
 
 ## 📝 License
 
-MIT — see source headers.
+MIT — see [LICENSE](LICENSE).
