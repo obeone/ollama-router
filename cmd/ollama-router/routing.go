@@ -193,6 +193,27 @@ func (appState *AppState) chooseNodeForPull(model string) *NodeState {
 	return appState.leastBusyHealthyNode()
 }
 
+// nodesWithModelLocal returns every healthy node that has the model on
+// disk. The model name is normalized to lowercase to match the cache/map
+// convention. Returns nil if model is empty or no healthy node has it.
+func (appState *AppState) nodesWithModelLocal(model string) []*NodeState {
+	if model == "" {
+		return nil
+	}
+	lower := strings.ToLower(model)
+	var nodes []*NodeState
+	for _, ns := range appState.NodeStates {
+		ns.mu.RLock()
+		_, hasLocal := ns.LocalModels[lower]
+		isOK := ns.OK
+		ns.mu.RUnlock()
+		if isOK && hasLocal {
+			nodes = append(nodes, ns)
+		}
+	}
+	return nodes
+}
+
 // chooseNodeWithModel finds the best node that has a model locally.
 // If multiple nodes have the model, the best node is selected based on load and latency.
 func (appState *AppState) chooseNodeWithModel(model string) *NodeState {
