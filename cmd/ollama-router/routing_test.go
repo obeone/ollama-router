@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"sync"
@@ -282,6 +288,256 @@ func TestChooseNodeForPull(t *testing.T) {
 		node := appState.chooseNodeForPull("")
 		if node == nil {
 			t.Error("want a node, got nil")
+		}
+	})
+}
+
+func TestNodesWithModelLocal(t *testing.T) {
+	baseURL, _ := url.Parse("http://localhost:11434")
+
+	healthyWithModel := &NodeState{
+		Name:         "has",
+		BaseURL:      baseURL,
+		OK:           true,
+		LoadedModels: map[string]struct{}{},
+		LocalModels:  map[string]struct{}{"llama2:latest": {}},
+	}
+	healthyWithoutModel := &NodeState{
+		Name:         "empty",
+		BaseURL:      baseURL,
+		OK:           true,
+		LoadedModels: map[string]struct{}{},
+		LocalModels:  map[string]struct{}{},
+	}
+	unhealthyWithModel := &NodeState{
+		Name:         "sick",
+		BaseURL:      baseURL,
+		OK:           false,
+		LoadedModels: map[string]struct{}{},
+		LocalModels:  map[string]struct{}{"llama2:latest": {}},
+	}
+	secondHealthyWithModel := &NodeState{
+		Name:         "has2",
+		BaseURL:      baseURL,
+		OK:           true,
+		LoadedModels: map[string]struct{}{},
+		LocalModels:  map[string]struct{}{"llama2:latest": {}},
+	}
+
+	t.Run("empty model returns nil", func(t *testing.T) {
+		appState := &AppState{
+			NodeStates: map[string]*NodeState{"has": healthyWithModel},
+			Config:     &Config{},
+		}
+		got := appState.nodesWithModelLocal("")
+		if got != nil {
+			t.Errorf("want nil for empty model, got %v", got)
+		}
+	})
+
+	t.Run("unhealthy node not returned", func(t *testing.T) {
+		appState := &AppState{
+			NodeStates: map[string]*NodeState{"sick": unhealthyWithModel},
+			Config:     &Config{},
+		}
+		got := appState.nodesWithModelLocal("llama2:latest")
+		if len(got) != 0 {
+			t.Errorf("want 0 nodes (unhealthy), got %d", len(got))
+		}
+	})
+
+	t.Run("model on one healthy node", func(t *testing.T) {
+		appState := &AppState{
+			NodeStates: map[string]*NodeState{
+				"has":   healthyWithModel,
+				"empty": healthyWithoutModel,
+			},
+			Config: &Config{},
+		}
+		got := appState.nodesWithModelLocal("llama2:latest")
+		if len(got) != 1 {
+			t.Errorf("want 1 node, got %d", len(got))
+		}
+		if got[0].Name != "has" {
+			t.Errorf("want node 'has', got %s", got[0].Name)
+		}
+	})
+
+	t.Run("model on multiple healthy nodes", func(t *testing.T) {
+		appState := &AppState{
+			NodeStates: map[string]*NodeState{
+				"has":  healthyWithModel,
+				"has2": secondHealthyWithModel,
+			},
+			Config: &Config{},
+		}
+		got := appState.nodesWithModelLocal("llama2:latest")
+		if len(got) != 2 {
+			t.Errorf("want 2 nodes, got %d", len(got))
+		}
+	})
+
+	t.Run("lowercase normalization matches mixed-case query", func(t *testing.T) {
+		// LocalModels key is lowercase (as stored by refreshNodeState)
+		nodeLC := &NodeState{
+			Name:         "lc",
+			BaseURL:      baseURL,
+			OK:           true,
+			LoadedModels: map[string]struct{}{},
+			LocalModels:  map[string]struct{}{"llama2:latest": {}}, // stored lowercase
+		}
+		appState := &AppState{
+			NodeStates: map[string]*NodeState{"lc": nodeLC},
+			Config:     &Config{},
+		}
+		// Query with mixed case — must still match
+		got := appState.nodesWithModelLocal("LLaMa2:Latest")
+		if len(got) != 1 {
+			t.Errorf("want 1 node with mixed-case query, got %d", len(got))
+		}
+	})
+}
+
+// makeBackend starts a minimal httptest.Server that records hit count and returns status 200.
+func makeBackend(t *testing.T, hits *int, mu *sync.Mutex) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		*hits++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	}))
+}
+
+// makeNode builds a NodeState wired to a live httptest.Server URL, with
+// its ReverseProxy initialised so proxyRequest does not panic.
+func makeNode(name string, srv *httptest.Server, localModels map[string]struct{}) *NodeState {
+	u, _ := url.Parse(srv.URL)
+	proxy := &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = u.Scheme
+			req.URL.Host = u.Host
+		},
+	}
+	return &NodeState{
+		Name:         name,
+		BaseURL:      u,
+		Proxy:        proxy,
+		OK:           true,
+		LoadedModels: map[string]struct{}{},
+		LocalModels:  localModels,
+	}
+}
+
+func TestHandleCreateRouting(t *testing.T) {
+	cfg := &Config{
+		ModelCacheTTL:        1 * time.Second,
+		ReadTimeout:          5 * time.Second,
+		DefaultRequestTimeout: 5 * time.Second,
+	}
+
+	buildAppState := func(nodes map[string]*NodeState) *AppState {
+		return &AppState{
+			NodeStates:      nodes,
+			ModelOwnerCache: &sync.Map{},
+			Config:          cfg,
+			Client:          &http.Client{Timeout: 5 * time.Second},
+		}
+	}
+
+	body := func(model string) io.Reader {
+		b, _ := json.Marshal(map[string]string{"model": model, "modelfile": "FROM scratch"})
+		return bytes.NewReader(b)
+	}
+
+	t.Run("0 owners routes to stable node only", func(t *testing.T) {
+		var hitsA, hitsB int
+		var mu sync.Mutex
+
+		srvA := makeBackend(t, &hitsA, &mu)
+		defer srvA.Close()
+		srvB := makeBackend(t, &hitsB, &mu)
+		defer srvB.Close()
+
+		// "aaa" sorts before "bbb" → stable node is nodeA
+		nodeA := makeNode("aaa", srvA, map[string]struct{}{}) // model NOT present
+		nodeB := makeNode("bbb", srvB, map[string]struct{}{}) // model NOT present
+
+		appState := buildAppState(map[string]*NodeState{"aaa": nodeA, "bbb": nodeB})
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/create", body("newmodel"))
+		req.Header.Set("Content-Type", "application/json")
+		appState.handleCreate(rr, req)
+
+		mu.Lock()
+		gotA, gotB := hitsA, hitsB
+		mu.Unlock()
+
+		if gotA != 1 || gotB != 0 {
+			t.Errorf("want hitsA=1 hitsB=0, got hitsA=%d hitsB=%d", gotA, gotB)
+		}
+	})
+
+	t.Run("1 owner routes to that node only", func(t *testing.T) {
+		var hitsA, hitsB int
+		var mu sync.Mutex
+
+		srvA := makeBackend(t, &hitsA, &mu)
+		defer srvA.Close()
+		srvB := makeBackend(t, &hitsB, &mu)
+		defer srvB.Close()
+
+		// nodeB has the model locally; nodeA (stable) does not
+		nodeA := makeNode("aaa", srvA, map[string]struct{}{})
+		nodeB := makeNode("bbb", srvB, map[string]struct{}{"mymodel": {}})
+
+		appState := buildAppState(map[string]*NodeState{"aaa": nodeA, "bbb": nodeB})
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/create", body("mymodel"))
+		req.Header.Set("Content-Type", "application/json")
+		appState.handleCreate(rr, req)
+
+		mu.Lock()
+		gotA, gotB := hitsA, hitsB
+		mu.Unlock()
+
+		// Must hit nodeB (the owner), NOT nodeA (stable)
+		if gotA != 0 || gotB != 1 {
+			t.Errorf("want hitsA=0 hitsB=1, got hitsA=%d hitsB=%d", gotA, gotB)
+		}
+	})
+
+	t.Run("2 owners broadcasts to both nodes", func(t *testing.T) {
+		var hitsA, hitsB int
+		var mu sync.Mutex
+
+		srvA := makeBackend(t, &hitsA, &mu)
+		defer srvA.Close()
+		srvB := makeBackend(t, &hitsB, &mu)
+		defer srvB.Close()
+
+		// Both nodes have the model locally
+		nodeA := makeNode("aaa", srvA, map[string]struct{}{"sharedmodel": {}})
+		nodeB := makeNode("bbb", srvB, map[string]struct{}{"sharedmodel": {}})
+
+		appState := buildAppState(map[string]*NodeState{"aaa": nodeA, "bbb": nodeB})
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/create", body("sharedmodel"))
+		req.Header.Set("Content-Type", "application/json")
+		appState.handleCreate(rr, req)
+
+		mu.Lock()
+		gotA, gotB := hitsA, hitsB
+		mu.Unlock()
+
+		// Both must be hit (broadcast)
+		if gotA != 1 || gotB != 1 {
+			t.Errorf("want hitsA=1 hitsB=1, got hitsA=%d hitsB=%d", gotA, gotB)
 		}
 	})
 }
