@@ -96,7 +96,7 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model":"llama3","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-Build it yourself — static binary on `gcr.io/distroless/static-debian12`,
+Build it yourself — static binary on `gcr.io/distroless/static-debian13`,
 runs as nonroot (see [`Dockerfile`](Dockerfile)):
 
 ```bash
