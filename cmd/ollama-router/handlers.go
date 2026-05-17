@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -306,16 +307,112 @@ func (appState *AppState) handleCopy(w http.ResponseWriter, r *http.Request) {
 	appState.proxyRequest(w, r, node)
 }
 
-// handleCreate routes a create request to a deterministically chosen stable node
-// so it lands on the same backend as the preceding blob uploads.
+// handleCreate routes a create request based on where the target model
+// already lives: a brand-new model is pinned to the stable node (so it
+// stays co-located with any uploaded blobs); a model that already exists
+// on exactly one node is updated in place there; a model replicated on
+// several nodes has the create broadcast to all of them so every copy
+// stays consistent.
 func (appState *AppState) handleCreate(w http.ResponseWriter, r *http.Request) {
-	node := appState.stableHealthyNode()
-	if node == nil {
-		respondError(w, http.StatusServiceUnavailable, "no healthy backend available for create")
+	bodyBytes, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	model, _ := extractModelFromBody(bodyBytes)
+	targets := appState.nodesWithModelLocal(model)
+
+	switch len(targets) {
+	case 0:
+		node := appState.stableHealthyNode()
+		if node == nil {
+			respondError(w, http.StatusServiceUnavailable, "no healthy backend available for create")
+			return
+		}
+		logger.Info("Routing create request", "model", model, "node", node.Name, "decision", "CREATE_NEW_STABLE")
+		appState.proxyRequest(w, r, node)
+	case 1:
+		node := targets[0]
+		logger.Info("Routing create request", "model", model, "node", node.Name, "decision", "CREATE_EXISTS_SINGLE")
+		appState.proxyRequest(w, r, node)
+	default:
+		logger.Info("Broadcasting create request", "model", model, "nodes", len(targets), "decision", "CREATE_EXISTS_BROADCAST")
+		appState.broadcastCreate(w, r, bodyBytes, targets)
+	}
+}
+
+// broadcastCreate fans a create request out to every target node so all
+// replicas of an existing model are rebuilt consistently. The first node
+// that returns a non-error response is streamed back to the client;
+// other successful nodes are drained to completion so their create
+// actually finishes (closing early could abort the backend operation).
+func (appState *AppState) broadcastCreate(w http.ResponseWriter, r *http.Request, bodyBytes []byte, targets []*NodeState) {
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	resultChan := make(chan result, len(targets))
+	// appState.Client carries a short total Timeout (DefaultRequestTimeout)
+	// tuned for the polling calls; a real `ollama create` runs for minutes,
+	// so the broadcast uses a client with no total deadline and relies on
+	// the request context for cancellation, mirroring the streaming budget
+	// the single-node proxy path gets from TimeoutHandler(ReadTimeout).
+	streamClient := &http.Client{Transport: appState.Client.Transport}
+	var wg sync.WaitGroup
+	for _, node := range targets {
+		wg.Add(1)
+		go func(ns *NodeState) {
+			defer wg.Done()
+			reqURL := ns.BaseURL.JoinPath("/api/create")
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, reqURL.String(), bytes.NewReader(bodyBytes))
+			if err != nil {
+				resultChan <- result{err: err}
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := streamClient.Do(req)
+			resultChan <- result{resp: resp, err: err}
+		}(node)
+	}
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	forwarded := false
+	var errs []error
+	var lastBad *http.Response
+	for res := range resultChan {
+		if res.err != nil {
+			errs = append(errs, res.err)
+			continue
+		}
+		if res.resp.StatusCode >= 400 {
+			if lastBad != nil {
+				lastBad.Body.Close()
+			}
+			lastBad = res.resp
+			continue
+		}
+		if !forwarded {
+			forwarded = true
+			forwardResponse(w, res.resp) // streams body, then closes it
+			continue
+		}
+		// Secondary success: drain so the create finishes on that replica.
+		io.Copy(io.Discard, res.resp.Body)
+		res.resp.Body.Close()
+	}
+
+	if forwarded {
+		if lastBad != nil {
+			lastBad.Body.Close()
+		}
 		return
 	}
-	logger.Info("Routing create request", "node", node.Name)
-	appState.proxyRequest(w, r, node)
+	if lastBad != nil {
+		forwardResponse(w, lastBad)
+		return
+	}
+	respondError(w, http.StatusBadGateway, fmt.Sprintf("create failed on all nodes: %v", errors.Join(errs...)))
 }
 
 // handleBlob pins blob existence checks (HEAD) and uploads (POST) to a
