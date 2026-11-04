@@ -290,7 +290,7 @@ concern:
 | `metrics.go` | Prometheus collectors |
 | `models.go` | Ollama + OpenAI wire types |
 
-See [`CLAUDE.md`](CLAUDE.md) for the architectural invariants you must preserve
+See [`AGENTS.md`](AGENTS.md) for the architectural invariants you must preserve
 when contributing.
 
 ---
